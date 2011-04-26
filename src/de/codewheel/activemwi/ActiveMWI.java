@@ -17,6 +17,7 @@ import org.asteriskjava.manager.action.StatusAction;
 import org.asteriskjava.manager.event.ManagerEvent;
 import org.asteriskjava.manager.event.PeerStatusEvent;
 import org.asteriskjava.manager.response.MailboxStatusResponse;
+import org.asteriskjava.manager.response.ManagerResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,8 @@ import org.slf4j.LoggerFactory;
  */
 public class ActiveMWI implements ManagerEventListener {
 	
+
+	private static final long MAILBOX_CONNECT_DELAY = 3000L;
 
 	private static final Logger LOG = LoggerFactory.getLogger(ActiveMWI.class);
 
@@ -136,7 +139,7 @@ public class ActiveMWI implements ManagerEventListener {
 			hasNewMessages = mboxResponse.getWaiting();
 			
 			if (hasNewMessages) {
-				// TODO log exact number of waiting messages
+				// TODO log exact number of waiting messages using MailboxCountAction
 				LOG.info("Peer[{}] new messages", peer);				
 			} else {
 				LOG.info("Peer[{}] has no new messages");
@@ -153,13 +156,13 @@ public class ActiveMWI implements ManagerEventListener {
 	public void connectToMailbox(String peer) {
 		try {
 			try {
-				Thread.sleep(3000L);
+				Thread.sleep(MAILBOX_CONNECT_DELAY);
 			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			OriginateAction mboxConnect;
-			mboxConnect = new OriginateAction();
+			
+			OriginateAction mboxConnect = new OriginateAction();
 			mboxConnect.setChannel(peer);
 			mboxConnect.setContext(MBOX_CONTEXT);
 			mboxConnect.setExten(MBOX_EXTEN);
@@ -212,10 +215,12 @@ public class ActiveMWI implements ManagerEventListener {
 	
 	
 	private boolean connect(OriginateAction mboxConnect) throws IllegalArgumentException, IllegalStateException, IOException, TimeoutException {		
+		// TODO distinguish between connection failure and client canceling the call
 		LOG.debug("Connecting to mailbox of peer[{}]", mboxConnect.getChannel());
-		String response = cmdConnection.sendAction(mboxConnect, MBOX_RING_TIMEOUT).getResponse();
-		LOG.debug("Connection to peer[{}] established, status[{}]", mboxConnect.getChannel(), response);
-		return response.equals("Success");
+		ManagerResponse response = cmdConnection.sendAction(mboxConnect, MBOX_RING_TIMEOUT);
+		String responseCode = response.getResponse();
+		LOG.debug("Connection to peer[{}] established, status[{}]", mboxConnect.getChannel(), responseCode);
+		return "Success".equals(responseCode);
 	}
 
 }
