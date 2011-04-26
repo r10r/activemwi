@@ -100,29 +100,14 @@ public class ActiveMWI implements ManagerEventListener {
 			try {
 				// open command connection
 				cmdConnection.login();
+				
 				String peer = event.getPeer();
 				// connect reachable client to mailbox
 				if (hasNewMessages(peer)) {
-					System.out.println(peer + " has new messages.");
 					connectToMailbox(peer);
-				} else {
-					System.out.println(peer + " has no new messages.");
 				}
-			} catch (IllegalArgumentException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IllegalStateException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (TimeoutException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (AuthenticationFailedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+			} catch (Exception e) {
+				throw new RuntimeException(e);
 			} finally {
 				cmdConnection.logoff();
 			}
@@ -131,34 +116,31 @@ public class ActiveMWI implements ManagerEventListener {
 	}
 
 	public boolean hasNewMessages(String peer) {
+		boolean hasWaitingMessages = false;
 
 		try {
 			// query mailbox for new messages
-			MailboxStatusAction mboxAction = new MailboxStatusAction(peer
-					.replace("SIP/", "")
-					+ "@default");
+			MailboxStatusAction mboxAction = new MailboxStatusAction(peer.replace("SIP/", "") + "@default");
 			MailboxStatusResponse mboxResponse;
-			mboxResponse = (MailboxStatusResponse) cmdConnection.sendAction(
-					mboxAction, 10000L);
+			mboxResponse = (MailboxStatusResponse) cmdConnection.sendAction( mboxAction, 10000L);
+			
 			// connect reachable client to mailbox
-			return mboxResponse.getWaiting();
-		} catch (IllegalArgumentException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalStateException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (TimeoutException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			hasWaitingMessages = mboxResponse.getWaiting();
+			
+			if (hasWaitingMessages) {
+				// TODO get exact number of waiting messages
+				LOG.info("Peer[{}] has[{}] new messages", peer, 666);				
+			} else {
+				LOG.info("Peer[{}] hase no new messages");
+			}
+			
+			return hasWaitingMessages;
+			
+		} catch (Exception e) {
+			throw new RuntimeException(e);
 		}
-		return false;
 	}
 
-	
 	// TODO: add better retry policy
 	public void connectToMailbox(String peer) {
 		try {
@@ -177,39 +159,34 @@ public class ActiveMWI implements ManagerEventListener {
 			mboxConnect.setPriority(new Integer(1));
 			mboxConnect.setTimeout(MBOX_RING_TIMEOUT);
 
-			String response = "Error";
+			boolean connectionEstablished = true;
 			int counter = 0;
 			// try to connect the peer to the mailbox until success
-			while (!response.equals("Success")) {
-				
+			while (!connectionEstablished) {
+
 				counter++;
-				
-				if (counter >= MBOX_RETRY_MAX ) { 
-					System.out.println("Maximum connection retries exceeded. Aborting!");
-					break; }
-				
-				// if client has read message in the meantime don't call him
-				if (! hasNewMessages(peer)) {
-					System.out.println("Client has read messages in meantime. Aborting!");
+
+				if (counter >= MBOX_RETRY_MAX) {
+					LOG.error("Maximum connection retries exceeded. Aborting!");
 					break;
 				}
-				System.out.println("Trying to connect " + peer
-						+ " to his mailbox.");
-				response = cmdConnection.sendAction(mboxConnect,
-						MBOX_RING_TIMEOUT+5000).getResponse();
-				System.out.println("Response to mailbox connection was: "
-						+ response);
-				
+
+				// if client has read message in the meantime don't call him
+				if (!hasNewMessages(peer)) {
+					LOG.debug("Client has read messages in meantime. Aborting!");
+					break;
+				}
+				connectionEstablished = connect(mboxConnect);
+
 				// if client anwered the call finish calling loop
-				if (response.equals("Success")) {
-					System.out.println("Client connection was successful.");
+				if (connectionEstablished) {
+					LOG.info("Connection established after [{}] retries");
 					break;
 				}
 				try {
 					Thread.sleep(MBOX_RETRY_INTERVAL);
 				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
+					throw new RuntimeException(e);
 				}
 			}
 
@@ -221,6 +198,13 @@ public class ActiveMWI implements ManagerEventListener {
 			e.printStackTrace();
 		}
 		System.out.println("Connect to mailbox loop finished!");
+	}
+	
+	
+	private boolean connect(OriginateAction mboxConnect) throws IllegalArgumentException, IllegalStateException, IOException, TimeoutException {		
+		LOG.debug("Trying to connect to mailbox of peer[{}]", mboxConnect.getChannel());
+		String response = cmdConnection.sendAction(mboxConnect, MBOX_RING_TIMEOUT + 5000).getResponse();
+		return response.equals("Success");
 	}
 
 }
