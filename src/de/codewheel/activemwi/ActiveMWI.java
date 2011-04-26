@@ -2,6 +2,9 @@ package de.codewheel.activemwi;
 
 import java.io.IOException;
 
+import org.apache.commons.configuration.CompositeConfiguration;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.configuration.PropertiesConfiguration;
 import org.asteriskjava.manager.AuthenticationFailedException;
 import org.asteriskjava.manager.ManagerConnection;
 import org.asteriskjava.manager.ManagerConnectionFactory;
@@ -14,25 +17,37 @@ import org.asteriskjava.manager.action.StatusAction;
 import org.asteriskjava.manager.event.ManagerEvent;
 import org.asteriskjava.manager.event.PeerStatusEvent;
 import org.asteriskjava.manager.response.MailboxStatusResponse;
-import org.asteriskjava.manager.response.ManagerResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ActiveMWI implements ManagerEventListener {
+	
+	private static final Logger LOG = LoggerFactory.getLogger(ActiveMWI.class);
 
 	private ManagerConnection eventConnection;
 	private ManagerConnection cmdConnection;
 
-	public static String SERVER_IP = "172.16.123.222";
-	private static String MANAGER_USER = "manager";
-	private static String MANAGER_PASS = "tekO9BNfS8J668TkZZLI7Z";
-	private static String MBOX_EXTEN = "9000";
-	private static String MBOX_CONTEXT = "outgoing";
-	private static long MBOX_RING_TIMEOUT = 20000L;
-	private static long MBOX_RETRY_INTERVAL = 600000L;
-	private static int MBOX_RETRY_MAX = 6;
+	private static CompositeConfiguration config = new CompositeConfiguration();
+	static {
+		try {
+			config.addConfiguration(new PropertiesConfiguration("/etc/activemwi.properties"));
+		} catch (ConfigurationException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	public static String SERVER_IP = config.getString("SERVER_IP", "localhost");
+	public static int SERVER_PORT = config.getInt("SERVER_PORT", 5038);
+	private static String MANAGER_USER = config.getString("MANAGER_USER");
+	private static String MANAGER_PASS = config.getString("MANAGER_PASS");
+	private static String MBOX_EXTEN = config.getString("MBOX_EXTEN");
+	private static String MBOX_CONTEXT = config.getString("MBOX_CONTEXT");
+	private static long MBOX_RING_TIMEOUT = config.getLong("MBOX_RING_TIMEOUT", 20000);
+	private static long MBOX_RETRY_INTERVAL = config.getLong("MBOX_RETRY_INTERVAL", 600000);
+	private static int MBOX_RETRY_MAX = config.getInt("MBOX_RETRY_MAX", 6);
 
 	public ActiveMWI() throws IOException {
-		ManagerConnectionFactory factory = new ManagerConnectionFactory(
-				SERVER_IP, MANAGER_USER, MANAGER_PASS);
+		ManagerConnectionFactory factory = new ManagerConnectionFactory(SERVER_IP, SERVER_PORT, MANAGER_USER, MANAGER_PASS);
 
 		// create connections
 		eventConnection = factory.createManagerConnection();
