@@ -11,20 +11,22 @@ import org.asteriskjava.manager.ManagerConnectionFactory;
 import org.asteriskjava.manager.ManagerConnectionState;
 import org.asteriskjava.manager.ManagerEventListener;
 import org.asteriskjava.manager.TimeoutException;
-import org.asteriskjava.manager.action.MailboxStatusAction;
+import org.asteriskjava.manager.action.MailboxCountAction;
 import org.asteriskjava.manager.action.OriginateAction;
 import org.asteriskjava.manager.action.StatusAction;
 import org.asteriskjava.manager.event.ManagerEvent;
 import org.asteriskjava.manager.event.PeerStatusEvent;
-import org.asteriskjava.manager.response.MailboxStatusResponse;
+import org.asteriskjava.manager.response.MailboxCountResponse;
 import org.asteriskjava.manager.response.ManagerResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * TODO fix reconnection problem on asterisk restart
+ * TODO fix connection/event loop (events are not processed when sleeping in mailbox connection loop)
+ * TODO better exception handling
  * 
- * @author <a href="mailto:rjenster@ocotec.de">Ruben Jenster</a>
+ * @author <a href="mailto:rjenster@gmail.com">Ruben Jenster</a>
  *
  */
 public class ActiveMWI implements ManagerEventListener {
@@ -46,21 +48,20 @@ public class ActiveMWI implements ManagerEventListener {
 		}
 	}
 
-	private static String SERVER_IP = config.getString("SERVER_IP", "localhost");
-	private static int SERVER_PORT = config.getInt("SERVER_PORT", 5038);
-	private static String MANAGER_USER = config.getString("MANAGER_USER");
-	private static String MANAGER_PASS = config.getString("MANAGER_PASS");
-	private static String MBOX_EXTEN = config.getString("MBOX_EXTEN");
-	private static String MBOX_CONTEXT = config.getString("MBOX_CONTEXT");
-	private static long MBOX_RING_TIMEOUT = config.getLong("MBOX_RING_TIMEOUT", 20000);
-	private static long MBOX_RETRY_INTERVAL = config.getLong("MBOX_RETRY_INTERVAL", 600000);
-	private static int MBOX_RETRY_MAX = config.getInt("MBOX_RETRY_MAX", 6);
-	private static long CONNECTION_TIMEOUT = config.getLong("CONNECTION_TIMEOUT", 10000);
+	private static String SERVER_IP = config.getString("server.ip", "localhost");
+	private static int SERVER_PORT = config.getInt("manager.port", 5038);
+	private static String MANAGER_USER = config.getString("manager.user");
+	private static String MANAGER_PASS = config.getString("manager.pass");
+	private static String MBOX_EXTEN = config.getString("mbox.exten");
+	private static String MBOX_CONTEXT = config.getString("mbox.context");
+	private static long MBOX_RING_TIMEOUT = config.getLong("mbox.ring.timeout", 20000);
+	private static long MBOX_RETRY_INTERVAL = config.getLong("mbox.retry.interval", 600000);
+	private static int MBOX_RETRY_MAX = config.getInt("mbox.retry.max", 6);
 
 	public ActiveMWI() throws IOException {
 		ManagerConnectionFactory factory = new ManagerConnectionFactory(SERVER_IP, SERVER_PORT, MANAGER_USER, MANAGER_PASS);
 
-		// create connections
+		// create manager connections
 		eventConnection = factory.createManagerConnection();
 		cmdConnection = factory.createManagerConnection();
 	}
@@ -73,9 +74,9 @@ public class ActiveMWI implements ManagerEventListener {
 
 		while (true) {
 
-			// connect to Asterisk and log in
+			// connect to asterisk manager and log in
 			eventConnection.login();
-
+			
 			// request channel state
 			eventConnection.sendAction(new StatusAction());
 
@@ -90,10 +91,10 @@ public class ActiveMWI implements ManagerEventListener {
 	}
 
 	public static void main(String[] args) throws Exception {
-		ActiveMWI helloEvents;
+		ActiveMWI activeMWI;
 
-		helloEvents = new ActiveMWI();
-		helloEvents.run();
+		activeMWI = new ActiveMWI();
+		activeMWI.run();
 	}
 
 	public void onManagerEvent(ManagerEvent event) {
@@ -128,24 +129,20 @@ public class ActiveMWI implements ManagerEventListener {
 
 	public boolean hasNewMessages(String peer) {
 		
-		boolean hasNewMessages = false;
-
 		try {
 			// query mailbox for new messages
-			MailboxStatusAction mboxAction = new MailboxStatusAction(peer.replace("SIP/", "") + "@default");
-			MailboxStatusResponse mboxResponse = (MailboxStatusResponse) cmdConnection.sendAction(mboxAction, CONNECTION_TIMEOUT);
+			String mailbox = peer.replace("SIP/", "") + "@default";
+
+			MailboxCountResponse mboxCountResponse = (MailboxCountResponse) cmdConnection.sendAction(new MailboxCountAction(mailbox));
+			int newMessageCount = mboxCountResponse.getNewMessages();
 			
-			// connect reachable client to mailbox
-			hasNewMessages = mboxResponse.getWaiting();
-			
-			if (hasNewMessages) {
-				// TODO log exact number of waiting messages using MailboxCountAction
-				LOG.info("Peer[{}] new messages", peer);				
+			if (newMessageCount > 0) {
+				LOG.info("Peer[{}] has[{}] new messages", peer, newMessageCount);
+				return true;
 			} else {
-				LOG.info("Peer[{}] has no new messages");
+				LOG.info("Peer[{}] has no new messages", peer);
+				return false;
 			}
-			
-			return hasNewMessages;
 			
 		} catch (Exception e) {
 			throw new RuntimeException(e);
@@ -182,7 +179,7 @@ public class ActiveMWI implements ManagerEventListener {
 					break;
 				}
 
-				// if client has read message in the meantime don't call him
+				// if client has read the messages in the meantime don't call him
 				if (!hasNewMessages(peer)) {
 					LOG.debug("Client has read messages in meantime. Aborting!");
 					break;
@@ -190,7 +187,7 @@ public class ActiveMWI implements ManagerEventListener {
 				
 				connectionEstablished = connect(mboxConnect);
 
-				// if client anwered the call finish calling loop
+				// if client answered the call finish calling loop
 				if (connectionEstablished) {
 					LOG.info("Connection established after [{}] retries");
 					break;
@@ -214,12 +211,23 @@ public class ActiveMWI implements ManagerEventListener {
 	}
 	
 	
-	private boolean connect(OriginateAction mboxConnect) throws IllegalArgumentException, IllegalStateException, IOException, TimeoutException {		
-		// TODO distinguish between connection failure and client canceling the call
+	/**
+	 * @param mboxConnect
+	 * @return true if the connection has been established and the peer answered the call, else false
+	 * @throws IllegalArgumentException
+	 * @throws IllegalStateException
+	 * @throws IOException
+	 * @throws TimeoutException
+	 */
+	private boolean connect(OriginateAction mboxConnect) throws IllegalStateException, IOException, TimeoutException {		
+		ManagerConnectionState state = cmdConnection.getState();
+		LOG.debug("Connection state[{}]", state.name());
 		LOG.debug("Connecting to mailbox of peer[{}]", mboxConnect.getChannel());
-		ManagerResponse response = cmdConnection.sendAction(mboxConnect, MBOX_RING_TIMEOUT);
+		// response timeout must be greater than the connection timeout, 
+		// else a TimeoutException is thrown if the peer doesn't pick up
+		ManagerResponse response = cmdConnection.sendAction(mboxConnect, mboxConnect.getTimeout() + 200);
 		String responseCode = response.getResponse();
-		LOG.debug("Connection to peer[{}] established, status[{}]", mboxConnect.getChannel(), responseCode);
+		LOG.debug("Connection to peer[{}] established, response[{}]", mboxConnect.getChannel(), responseCode);
 		return "Success".equals(responseCode);
 	}
 
