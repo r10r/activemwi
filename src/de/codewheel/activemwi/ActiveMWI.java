@@ -123,7 +123,6 @@ public class ActiveMWI implements ManagerEventListener {
 			} finally {
 				cmdConnection.logoff();
 			}
-
 		}
 	}
 
@@ -189,7 +188,7 @@ public class ActiveMWI implements ManagerEventListener {
 
 				// if client answered the call finish calling loop
 				if (connectionEstablished) {
-					LOG.info("Connection established after [{}] retries");
+					LOG.info("Connection established after [{}] retries", retries);
 					break;
 				}
 				try {
