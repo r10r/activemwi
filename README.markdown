@@ -1,6 +1,6 @@
 # Description
 
-ActiveMWI is a mailbox waiting message manager. It opens a manager connection to the asterisk
+ActiveMWI is a mailbox waiting message notifier. It opens up a manager connection to the asterisk
 and hooks onto the login event of a peer. When it receives a login event it looks for new
 messages in the mailbox of the peer. If the mailbox contains any unread messages, 
 then activemwi will originate a connection between the peer and the mailbox.
