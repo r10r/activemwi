@@ -5,6 +5,16 @@ and hooks onto the login event of a peer. When it receives a login event it look
 messages in the mailbox of the peer. If the mailbox contains any unread messages, 
 then activemwi will originate a connection between the peer and the mailbox.
 
+# Running
+
+The dependencies are managed using [buildr](http://buildr.apache.org/).
+
+There are currently two ways for running the project:
+
+- Using `buildr run`, which launches the compiled classes from the target folder.
+- Generate the eclipse configuration using `buildr eclipse` and create an
+  executable JAR including the dependencies from within eclipse.
+
 # Configuration
 
 The location of the configuration file is
