@@ -56,8 +56,8 @@ bindaddr = 172.16.123.222
 [activemwi]
 secret=tekO9BNfS8J668TkZZLI7Z
 permit=172.16.123.0/255.255.255.0
-read=all
-write=all
+read=system
+write=originate,reporting
 </pre>
 
 And the diaplan `/etc/asterisk/extension.conf` must have a matching context
