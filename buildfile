@@ -1,3 +1,5 @@
+repositories.remote << 'http://www.ibiblio.org/maven2'
+
 require 'time'
 
 THIS_VERSION = '0.1'
